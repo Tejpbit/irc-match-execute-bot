@@ -21,6 +21,13 @@ struct BotConfig {
     on_new_torrent: String,
 }
 
+fn is_modify_data_event(event: &notify::Event) -> bool {
+    match &event.kind {
+        notify::EventKind::Modify(notify::event::ModifyKind::Data(_)) => true,
+        _ => false
+    }
+}
+
 fn main() {
     let bot_config = read_config().expect("Bad config :(");
     let bot_config = Arc::new(Mutex::new(bot_config));
@@ -34,18 +41,28 @@ fn main() {
     let watcher_match_set = match_set.clone();
     let mut watcher: RecommendedWatcher = Watcher::new_immediate(move |res| {
         match res {
-            Ok(_event) => {
-                println!("Config updated, reloading");
+            Ok(event) => {
+                if !is_modify_data_event(&event) {
+                    return;
+                };
+
+                println!("Config file updated, reloading, {:?}", event);
                 let mut conf_resource = watcher_bot_config.lock().unwrap();
                 match read_config() {
                     Some(conf) => {
                         *conf_resource = conf;
                         println!("Conf updated");
-                        let patterns = RegexSet::new(&conf_resource.torrent_patterns[..]).expect("Couldn't create regexset");
-                        let mut ms = watcher_match_set.lock().unwrap();
-                        *ms = patterns;
-                        drop(ms);
-                        println!("Match set updated");
+                        match RegexSet::new(&conf_resource.torrent_patterns[..]) {
+                            Ok(patterns) => {
+                                let mut ms = watcher_match_set.lock().unwrap();
+                                *ms = patterns;
+                                drop(ms);
+                                println!("Match set updated");
+                            }
+                            Err(e) => {
+                                println!("Error, couldn't parse regex {}", e)
+                            }
+                        }
                     },
                     None => println!("Read config error")
                 }
@@ -78,9 +95,9 @@ fn main() {
     client.identify().unwrap();
 
     client.for_each_incoming(|irc_msg| {
-        let secret = {
-            &bot_config.lock().unwrap().user_secret
-        };
+        let secret_bot_config = &bot_config.lock().unwrap();
+        let current_bot_config = secret_bot_config.clone();
+
         // irc_msg is a Message
         if let Command::PRIVMSG(_channel, message) = irc_msg.command {
             // use RegexSet
@@ -93,16 +110,22 @@ fn main() {
                 Some((torrent_name, torrent_id)) => {
                     println!("Successfully parsed torrent announcment");
                     let torrent_name = utf8_percent_encode(&torrent_name, FRAGMENT);
-                    let torrent_url = format!("https://www.torrentleech.org/rss/download/{}/{}/{}", torrent_id, secret, torrent_name.to_string());
+                    let torrent_url = format!("https://www.torrentleech.org/rss/download/{}/{}/{}", torrent_id, current_bot_config.user_secret, torrent_name.to_string());
                     if matches.is_match(&message) {
                         //client.send_privmsg(&channel, "its a match").unwrap();
                         println!("Should download torrent and add to dl list {}", message);
 
-                        let cli_command = str::replace(&bot_config.lock().unwrap().on_new_torrent, "$url", &torrent_url);
+                        let cli_command = str::replace(&current_bot_config.on_new_torrent, "$url", &torrent_url);
                         println!("Running command: {}", cli_command);
                         match CliCommand::new("sh").arg("-c").arg(cli_command).output() {
                             Err(e) => println!("Failed to execute, error: {}", e),
-                            Ok(o) => println!("Successfully ran command: {:?}", o)
+                            Ok(o) => {
+                                if std::str::from_utf8(&o.stderr) != Ok("") {
+                                    println!("Stderr when running command, {:?}", o)
+                                } else {
+                                    println!("Successfully ran command: {:?}", o)
+                                }
+                            }
                         }
                     } else {
                         println!("Doesn't match any patterns");
