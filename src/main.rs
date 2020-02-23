@@ -7,6 +7,7 @@ use std::process::Command as CliCommand;
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use notify::{RecommendedWatcher, Watcher, RecursiveMode};
 use std::sync::{Arc, Mutex};
+use clap::Clap;
 
 const FRAGMENT: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
 
@@ -28,8 +29,18 @@ fn is_modify_data_event(event: &notify::Event) -> bool {
     }
 }
 
+#[derive(Clap)]
+#[clap(version = "1.0", author = "André Samuelsson")]
+struct Opts {
+    #[clap(short = "c", long = "config", default_value = "irc-match-execute-bot.conf")]
+    config: String,
+}
+
 fn main() {
-    let bot_config = read_config().expect("Bad config :(");
+    let opts: Opts = Opts::parse();
+
+
+    let bot_config = read_config(&opts.config).expect("Bad config :(");
     let bot_config = Arc::new(Mutex::new(bot_config));
 
     let bot_conf_mutex = bot_config.lock().unwrap();
@@ -48,7 +59,7 @@ fn main() {
 
                 println!("Config file updated, reloading, {:?}", event);
                 let mut conf_resource = watcher_bot_config.lock().unwrap();
-                match read_config() {
+                match read_config(&opts.config) {
                     Some(conf) => {
                         *conf_resource = conf;
                         println!("Conf updated");
@@ -93,7 +104,7 @@ fn main() {
 
     let client = IrcClient::from_config(config).unwrap();
     client.identify().unwrap();
-
+    println!("Connecting to irc...");
     client.for_each_incoming(|irc_msg| {
         let secret_bot_config = &bot_config.lock().unwrap();
         let current_bot_config = secret_bot_config.clone();
@@ -141,8 +152,9 @@ fn main() {
     }).unwrap();
 }
 
-fn read_config() -> Option<BotConfig> {
-    let bot_config = fs::read_to_string("botconfig.toml");//.ok()?;
+fn read_config(file: &String) -> Option<BotConfig> {
+    println!("Reading config from {}", file);
+    let bot_config = fs::read_to_string(file);
     toml::from_str::<BotConfig>(&bot_config.unwrap()).ok()
 }
 
