@@ -119,12 +119,12 @@ fn main() {
             match parse_torrent_announcement(message.clone()) {
                 None => println!("Couldn't parse {}", message),
                 Some((torrent_name, torrent_id)) => {
-                    println!("Successfully parsed torrent announcment");
-                    let torrent_name = utf8_percent_encode(&torrent_name, FRAGMENT);
-                    let torrent_url = format!("https://www.torrentleech.org/rss/download/{}/{}/{}", torrent_id, current_bot_config.user_secret, torrent_name.to_string());
+                    println!("Parsed name:\"{}\", id:\"{}\"", torrent_name, torrent_id);
                     if matches.is_match(&message) {
                         //client.send_privmsg(&channel, "its a match").unwrap();
-                        println!("Should download torrent and add to dl list {}", message);
+                        let torrent_name = utf8_percent_encode(&torrent_name, FRAGMENT);
+                        let torrent_url = format!("https://www.torrentleech.org/rss/download/{}/{}/{}", torrent_id, current_bot_config.user_secret, torrent_name.to_string());
+                        println!("Torrent url: {}", torrent_url);
 
                         let cli_command = str::replace(&current_bot_config.on_new_torrent, "$url", &torrent_url);
                         println!("Running command: {}", cli_command);
@@ -162,7 +162,6 @@ fn parse_torrent_announcement(message: String) -> Option<(String, String)> {
     let pattern = r".*: <.+>  Name:'(.+)' uploaded by '(?:.+)' -  https://www.torrentleech.org/torrent/(\d+)";
     let r = Regex::new(pattern).unwrap();
     let groups = r.captures(&message)?;
-    println!("{:?}", groups);
 
     if groups.len() != 3 { // match once for the whole string, once for the torrent name and once for the torrent id
         return None;
